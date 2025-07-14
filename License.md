@@ -1,4 +1,4 @@
-# Licencia Personalizada - Bot de Reclamación Automática de Recompensas
+# Licencia - Bot de Reclamación Automática de Recompensas
 ## Copyright (c) Jhorman Gallego Gallego 2025. Todos los derechos reservados.
 
 Este software, incluyendo el bot diseñado para reclamar automáticamente recompensas, está protegido por las leyes de derechos de autor. El uso, modificación, distribución o cualquier otra forma de explotación de este código fuente o sus derivados está estrictamente prohibido sin el consentimiento previo y por escrito del autor.
