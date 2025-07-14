@@ -1,0 +1,13 @@
+{
+  "name": "edge-automation-bot",
+  "version": "1.0.0",
+  "description": "Bot for Microsoft Edge automation",
+  "main": "botedge.js",
+  "scripts": {
+    "start": "node botedge.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.0",
+    "puppeteer": "^22.0.0"
+  }
+}
