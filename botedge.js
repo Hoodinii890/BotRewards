@@ -253,6 +253,7 @@ async function getCoords(element) {
 }
 
 async function searchPage(page, browser) {
+    await setEdgeHighPriority();
     const copilotPage = await browser.newPage();
     // Español-English:
     // Saca la url "copilot-url" del archivo .env usando process.env y guárdala como copilot_url.
@@ -360,50 +361,52 @@ async function searchPage(page, browser) {
                 for (const tema of temas) {
                     let intentos = 0;
                     const maxIntentos = 3;
-                    
-                    while (intentos < maxIntentos) {
+                    while (true) {
                         try {
                             // Esperar a que el campo de búsqueda esté disponible con timeout más corto
                             await page.waitForSelector('#sb_form_q', { timeout: 5000 });
-                            
                             // Pequeña espera para asegurar que la página esté completamente cargada
                             await sleep(1000);
-                            
                             // Limpiar el campo de búsqueda
                             await page.click('#sb_form_q');
                             await page.keyboard.down('Control');
                             await page.keyboard.press('A');
                             await page.keyboard.up('Control');
                             await page.keyboard.press('Backspace');
-                            
                             // Escribir el tema con delays aleatorios para simular escritura humana
                             for (let char of tema) {
                                 await page.keyboard.type(char, { delay: Math.random() * 100 + 50 });
                             }
-                            
                             // Esperar un momento antes de presionar Enter
                             await sleep(Math.random() * 1000 + 500);
                             await page.keyboard.press('Enter');
-                            
                             console.log(`Buscando: ${tema}`);
-                            
-                            // Esperar un tiempo aleatorio entre 30 segundos y 3 minutos
-                            const waitTime = Math.floor(Math.random() * (180000 - 30000) + 30000);
+                            // Esperar un tiempo aleatorio entre 30 segundos y 1 minuto
+                            const waitTime = Math.floor(Math.random() * (60000 - 30000) + 30000);
                             console.log(`Esperando ${Math.round(waitTime/1000)} segundos antes de la siguiente búsqueda...`);
                             await sleep(waitTime);
-                            
                             // Si llegamos aquí, la búsqueda fue exitosa
                             break;
-                            
                         } catch (error) {
                             intentos++;
                             console.log(`Error al buscar el tema "${tema}" (Intento ${intentos}/${maxIntentos}):`, error.message);
-                            
                             if (intentos < maxIntentos) {
-                                console.log(`Reintentando en 5 segundos...`);
-                                await sleep(5000);
+                                console.log(`Reintentando en 3 segundos...`);
+                                await sleep(3000);
                             } else {
-                                console.log(`No se pudo completar la búsqueda después de ${maxIntentos} intentos`);
+                                // Nuevo: Verificar si hay procesos Edge sin prioridad HIGH
+                                const processes = await getEdgeProcessesWithPriority();
+                                const notHigh = processes.filter(p => p.priority != 13);
+                                if (notHigh.length > 0) {
+                                    console.log(`Al menos ${notHigh.length} procesos Edge no tienen prioridad HIGH. Corrigiendo...`);
+                                    await setEdgeHighPriority();
+                                    intentos = 0; // Reiniciar intentos para este tema
+                                    console.log('Prioridad de Edge restaurada a HIGH. Reiniciando intentos para el tema.');
+                                    await sleep(3000);
+                                } else {
+                                    console.log(`No se pudo completar la búsqueda después de ${maxIntentos} intentos y todos los procesos Edge ya están en HIGH.`);
+                                    break;
+                                }
                             }
                         }
                     }
@@ -726,6 +729,65 @@ async function processRewardsPage(rewardsPage, browser) {
     }
 }
 
+// Obtener el nombre del proceso Edge desde variable de entorno o usar por defecto
+const EDGE_PROCESS_NAME = process.env.EDGE_PROCESS_NAME || 'msedge.exe';
+
+// Mapeo de nombres a valores de prioridad de Windows
+const PRIORITY_MAP = {
+    'high': 128
+};
+
+// Cambiar prioridad de todos los Edge a alta
+function setEdgeHighPriority() {
+    return new Promise((resolve, reject) => {
+        exec(`wmic process where name='${EDGE_PROCESS_NAME}' get ProcessId /format:csv`, (err, stdout, stderr) => {
+            if (err) return reject(err);
+            const lines = stdout.trim().split('\n').slice(1);
+            const pids = [];
+            for (const line of lines) {
+                const parts = line.split(',');
+                if (parts.length >= 3) {
+                    const pid = parseInt(parts[2]);
+                    if (!isNaN(pid)) pids.push(pid);
+                }
+            }
+            let changed = 0;
+            if (pids.length === 0) return resolve();
+            pids.forEach(pid => {
+                exec(`wmic process where processid='${pid}' CALL setpriority ${PRIORITY_MAP['high']}`, (err2) => {
+                    if (!err2) {
+                        console.log(`Prioridad de PID ${pid} cambiada a HIGH`);
+                    }
+                    changed++;
+                    if (changed === pids.length) resolve();
+                });
+            });
+        });
+    });
+}
+
+// Función para obtener los procesos Edge y sus prioridades
+function getEdgeProcessesWithPriority() {
+    return new Promise((resolve, reject) => {
+        exec(`wmic process where name='${EDGE_PROCESS_NAME}' get ProcessId,Priority /format:csv`, (err, stdout, stderr) => {
+            if (err) return reject(err);
+            const lines = stdout.trim().split('\n').slice(1);
+            const processes = [];
+            for (const line of lines) {
+                const parts = line.split(',');
+                if (parts.length >= 3) {
+                    const pid = parseInt(parts[2]);
+                    const priority = parseInt(parts[1]);
+                    if (!isNaN(pid) && !isNaN(priority)) {
+                        processes.push({ pid, priority });
+                    }
+                }
+            }
+            resolve(processes);
+        });
+    });
+}
+
 async function runBot() {
     await sleep(30000);
     try{
@@ -744,7 +806,7 @@ async function runBot() {
         console.log('Iniciando Edge con perfil personal...');
         const browser = await puppeteer.launch({
             executablePath: edgePath,
-            headless: false,
+            headless: false, // false para ver el navegador en pantalla, en true no se ve el navegador
             defaultViewport: null,
             userDataDir: userDataDir,
             args: [
@@ -798,7 +860,7 @@ async function runBot() {
         // Esperar a que los resultados aparezcan
         await sleep(5000);
         
-        press_click(activeTab, {x:1900,y:50})
+        press_click(activeTab, {x:1950,y:50})
         await sleep(4000);
         press_click(activeTab, {x:2000, y:100})
         await sleep(5000);
