@@ -5,6 +5,11 @@ const fs = require('fs');
 const dotenv = require('dotenv');
 dotenv.config();
 
+// Coordenadas de clicks en orden de ejecución
+const COORD_PRIMER_CLICK = { x: 650, y: 40 };
+const COORD_SEGUNDO_CLICK = { x: 1950, y: 50 };
+const COORD_TERCER_CLICK = { x: 2000, y: 100 };
+
 
 const copilot_url = process.env['copilot-url'];
 
@@ -361,6 +366,8 @@ async function searchPage(page, browser) {
                 for (const tema of temas) {
                     let intentos = 0;
                     const maxIntentos = 3;
+                    let intentos_no_high = 0;
+                    const maxIntentos_no_high = 1;
                     while (true) {
                         try {
                             // Esperar a que el campo de búsqueda esté disponible con timeout más corto
@@ -394,8 +401,14 @@ async function searchPage(page, browser) {
                                 console.log(`Reintentando en 3 segundos...`);
                                 await sleep(3000);
                             } else {
+                                intentos_no_high++;
+                                if (intentos_no_high < maxIntentos_no_high) {
+                                    console.log(`No se pudo completar la búsqueda después de ${maxIntentos_no_high} intentos y no se pudo cambiar la prioridad de Edge.`);
+                                    break;
+                                }
                                 // Nuevo: Verificar si hay procesos Edge sin prioridad HIGH
                                 const processes = await getEdgeProcessesWithPriority();
+                                console.log(processes);
                                 const notHigh = processes.filter(p => p.priority != 13);
                                 if (notHigh.length > 0) {
                                     console.log(`Al menos ${notHigh.length} procesos Edge no tienen prioridad HIGH. Corrigiendo...`);
@@ -741,7 +754,10 @@ const PRIORITY_MAP = {
 function setEdgeHighPriority() {
     return new Promise((resolve, reject) => {
         exec(`wmic process where name='${EDGE_PROCESS_NAME}' get ProcessId /format:csv`, (err, stdout, stderr) => {
-            if (err) return reject(err);
+            if (err) {
+                console.error('Error obteniendo procesos Edge:', err.message);
+                return reject(err);
+            }
             const lines = stdout.trim().split('\n').slice(1);
             const pids = [];
             for (const line of lines) {
@@ -752,11 +768,16 @@ function setEdgeHighPriority() {
                 }
             }
             let changed = 0;
-            if (pids.length === 0) return resolve();
+            if (pids.length === 0) {
+                console.log('No se encontraron procesos Edge para cambiar prioridad.');
+                return resolve();
+            }
             pids.forEach(pid => {
-                exec(`wmic process where processid='${pid}' CALL setpriority ${PRIORITY_MAP['high']}`, (err2) => {
+                exec(`wmic process where processid='${pid}' CALL setpriority ${PRIORITY_MAP['high']}`,(err2, stdout2, stderr2) => {
                     if (!err2) {
-                        console.log(`Prioridad de PID ${pid} cambiada a HIGH`);
+                        console.log(`Prioridad de PID ${pid} cambiada a HIGH. Mensaje: ${stdout2.trim()}`);
+                    } else {
+                        console.error(`Error cambiando prioridad de PID ${pid}:`, err2.message, '| Mensaje:', stderr2.trim());
                     }
                     changed++;
                     if (changed === pids.length) resolve();
@@ -845,7 +866,7 @@ async function runBot() {
         // Esperar a que la página de inicio se cargue
         await sleep(4000);
 
-        press_click(activeTab, {x:650, y:40})
+        press_click(activeTab, COORD_PRIMER_CLICK)
         
         // Escribir "rewards" con delays aleatorios para simular escritura humana
         let searchText = 'rewards';
@@ -860,9 +881,9 @@ async function runBot() {
         // Esperar a que los resultados aparezcan
         await sleep(5000);
         
-        press_click(activeTab, {x:1950,y:50})
+        press_click(activeTab, COORD_SEGUNDO_CLICK)
         await sleep(4000);
-        press_click(activeTab, {x:2000, y:100})
+        press_click(activeTab, COORD_TERCER_CLICK)
         await sleep(5000);
 
         // Esperar y capturar la nueva pestaña que se abre
