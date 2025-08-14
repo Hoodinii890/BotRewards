@@ -480,6 +480,7 @@ async function processRewardsPage(rewardsPage, browser) {
         console.log('Elementos encontrados:', rewardElements.length);
         
         // Procesar cada elemento de recompensa
+        let searchPageValidated = false;
         for (const element of rewardElements) {
             console.log('Procesando elemento:', element.text);
             
@@ -601,6 +602,7 @@ async function processRewardsPage(rewardsPage, browser) {
                         if (currentUrl === 'https://www.bing.com/') {
                             console.log('URL de Bing detectada, ejecutando searchPage...');
                             await searchPage(newTab, browser);
+                            searchPageValidated = true;
                         } else {
                             console.log('Recompensa reclamada correctamente.');
                         }
@@ -705,6 +707,7 @@ async function processRewardsPage(rewardsPage, browser) {
                                 if (currentUrl === 'https://www.bing.com/') {
                                     console.log('URL de Bing detectada, ejecutando searchPage...');
                                     await searchPage(newTab, browser);
+                                    searchPageValidated = true;
                                 } else {
                                     console.log('Recompensa reclamada correctamente.');
                                 }
@@ -729,11 +732,18 @@ async function processRewardsPage(rewardsPage, browser) {
                         console.log('No se encontró URL en el elemento');
                     }
                 }
-                
                 await sleep(1000);
             } else {
                 console.log('No se encontró el mee-card válido para:', element.text);
             }
+        }
+
+        if (!searchPageValidated) {
+            console.log("No se encontro tarjeta para la recompensa de busqueda. Accediendo a bing manualmente")
+            newTab = await browser.newPage();
+            await newTab.goto('https://www.bing.com/');
+            await sleep(500);
+            await searchPage(newTab, browser);
         }
         
     } catch (error) {
