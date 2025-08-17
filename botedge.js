@@ -894,7 +894,7 @@ async function runBot() {
         press_click(activeTab, COORD_SEGUNDO_CLICK)
         await sleep(4000);
         press_click(activeTab, COORD_TERCER_CLICK)
-        await sleep(5000);
+        await sleep(10000);
 
         // Esperar y capturar la nueva pestaña que se abre
         let allTabs = await browser.pages();
