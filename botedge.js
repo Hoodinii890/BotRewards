@@ -918,6 +918,21 @@ async function runBot() {
             await processRewardsPage(rewardsPage, browser);
             
             await sleep(2000);
+        }else{
+            console.log("No se pudo abrir con click. Accediendo a rewards manualmente")
+            await activeTab.goto('https://rewards.bing.com/?ref=rewardspanel', { waitUntil: 'domcontentloaded' });
+                
+            try {
+                await rewardsPage.waitForSelector('body', { timeout: 5000 });
+                console.log('Nueva página cargada correctamente');
+                
+                
+            } catch (error) {
+                console.log('La página ya estaba cargada');
+            }
+            // Procesar la página de rewards
+            await processRewardsPage(activeTab, browser);
+            await sleep(2000);
         }
 
 
