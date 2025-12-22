@@ -370,6 +370,11 @@ async function searchPage(page, browser) {
                     const maxIntentos_no_high = 1;
                     while (true) {
                         try {
+                            // Verificar que page.url sea "https://www.bing.com/" si no cambiar a esa
+                            const currentPageUrl = await page.url();
+                            if (currentPageUrl !== "https://www.bing.com/") {
+                                await page.goto("https://www.bing.com/");
+                            }
                             // Esperar a que el campo de búsqueda esté disponible con timeout más corto
                             await page.waitForSelector('#sb_form_q', { timeout: 5000 });
                             // Pequeña espera para asegurar que la página esté completamente cargada
@@ -440,43 +445,22 @@ async function searchPage(page, browser) {
 
 
 // Ejemplo de uso en la página de rewards
-async function processRewardsPage(rewardsPage, browser) {
+async function processRewardsPage(rewardsPage, browser, section) {
     try {
         // Esperar a que la página esté lista
         await rewardsPage.waitForSelector('body', { timeout: 5000 });
-        
+        await rewardsPage.waitForSelector('.grid', { timeout: 5000 });
+        const selector = '#'+section+' .react-aria-DisclosurePanel .grid'; 
+        await rewardsPage.waitForSelector(selector);
+        // Esperar a que al menos un elemento <a> esté presente dentro del selector (las "tarjetas" de rewards)
+        await rewardsPage.waitForSelector(`${selector} a`, { timeout: 10000 });
+        await sleep(3000)
         // Ejemplo: Obtener todos los elementos de recompensas
-        const rewardElements = await rewardsPage.$$eval('mee-card', elements => {
-            return elements.map(el => {
-                // Buscar en ambas estructuras posibles
-                const headingElement = el.querySelector('h3[mee-heading="heading"]') || el.querySelector('span[mee-heading="heading"]');
-                const iconSpan = el.querySelector('span.mee-icon');
-                const linkElement = el.querySelector('a.ds-card-sec');
-                
-                // Verificar si tiene el span con la clase correcta y no está bloqueado
-                const hasCorrectIcon = iconSpan && 
-                    iconSpan.className === 'mee-icon mee-icon-AddMedium' && 
-                    !iconSpan.className.includes('exclusiveLockedPts');
-                
-                // Verificar si el enlace está disponible y no está deshabilitado
-                const isLinkEnabled = linkElement && 
-                    !linkElement.hasAttribute('aria-disabled') && 
-                    linkElement.getAttribute('aria-disabled') !== 'true';
-                
-                return {
-                    text: headingElement ? headingElement.textContent : null,
-                    element: el,
-                    hasHeading: !!headingElement,
-                    hasCorrectIcon: hasCorrectIcon,
-                    isLinkEnabled: isLinkEnabled,
-                    html: el.outerHTML
-                };
-            }).filter(item => 
-                item.text !== null && 
-                (item.hasCorrectIcon || item.isLinkEnabled)
-            );
-        });
-        
+        const rewardElements = await rewardsPage.$eval(selector, el=>{
+            return Array.from(el.querySelectorAll('a')).map(anchor =>({
+                text: anchor.querySelector('p.line-clamp-3.text-body1Strong')?.textContent.trim(), 
+            }))
+        })
         console.log('Elementos encontrados:', rewardElements.length);
         
         // Procesar cada elemento de recompensa
@@ -485,54 +469,24 @@ async function processRewardsPage(rewardsPage, browser) {
             console.log('Procesando elemento:', element.text);
             
             // Obtener todos los mee-card
-            const cards = await rewardsPage.$$('mee-card');
+            const cards = await rewardsPage.$$(selector);
             let targetCard = null;
-
             for (const card of cards) {
                 // Verificar si este mee-card tiene el span con el texto y la clase correcta
                 const isValidCard = await card.evaluate((card, searchText) => {
                     // Buscar en ambas estructuras posibles
-                    const heading = card.querySelector('h3[mee-heading="heading"]') || card.querySelector('span[mee-heading="heading"]');
-                    const iconSpan = card.querySelector('span.mee-icon');
-                    const link = card.querySelector('a.ds-card-sec');
+                    const heading = card.querySelector('p[class="line-clamp-3 text-body1Strong"]');
+                    const hasCorrectText = heading && heading.textContent == searchText;
+                    const complete = card.querySelector('.bg-statusSuccessBg3') >= 0
                     
-                    const hasCorrectText = heading && heading.textContent === searchText;
-                    const hasCorrectIcon = iconSpan && 
-                        iconSpan.className === 'mee-icon mee-icon-AddMedium' && 
-                        !iconSpan.className.includes('exclusiveLockedPts');
-                    const isLinkEnabled = link && 
-                        !link.hasAttribute('aria-disabled') && 
-                        link.getAttribute('aria-disabled') !== 'true';
-                    
-                    // Verificar si el elemento está visible
                     const style = window.getComputedStyle(card);
                     const rect = card.getBoundingClientRect();
                     const isVisible = style.display !== 'none' && 
                                     style.visibility !== 'hidden' && 
-                                    style.opacity !== '0' &&
-                                    rect.width > 0 && 
-                                    rect.height > 0;
+                                    style.opacity !== '0';
                     
-                    console.log('Validación de tarjeta:', {
-                        text: heading ? heading.textContent : null,
-                        hasCorrectText,
-                        hasCorrectIcon,
-                        isLinkEnabled,
-                        isVisible,
-                        style: {
-                            display: style.display,
-                            visibility: style.visibility,
-                            opacity: style.opacity
-                        },
-                        rect: {
-                            width: rect.width,
-                            height: rect.height
-                        }
-                    });
-                    
-                    return hasCorrectText && (hasCorrectIcon || isLinkEnabled) && isVisible;
+                    return hasCorrectText && isVisible && complete;
                 }, element.text);
-                
                 if (isValidCard) {
                     targetCard = card;
                     break;
@@ -542,50 +496,51 @@ async function processRewardsPage(rewardsPage, browser) {
             if (targetCard) {
                 
                 // Obtener el enlace dentro de la tarjeta
-                const link = await targetCard.$('a.ds-card-sec');
+                const link = targetCard
                 if (!link) {
                     console.log('No se encontró el enlace en la tarjeta');
                     continue;
                 }
-
+                
                 // Obtener coordenadas del enlace
-                const box = await link.boundingBox();
+                await targetCard.scrollIntoViewIfNeeded();
+                const box = await targetCard.boundingBox();
                 if (!box) {
                     console.log('No se pudieron obtener las coordenadas del enlace');
-                    continue;
+                }else{
+                
+                    // Calcular el punto central del enlace
+                    const coords = {
+                        x: box.x + (box.width / 2),
+                        y: box.y + (box.height / 2)
+                    };
+    
+                    // Ajustar el scroll para mantener el elemento visible
+                    const viewportHeight = await rewardsPage.evaluate(() => window.innerHeight);
+                    const targetScrollY = coords.y - (viewportHeight / 2);
+                    
+                    // Recalcular las coordenadas después del scroll
+                    await humanScroll(rewardsPage, targetScrollY);
+                    
+                    // Esperar a que la página se estabilice después del scroll
+                    await sleep(1000);
+                    
+                    // Verificar nuevamente las coordenadas después del scroll
+                    const newBox = await link.boundingBox();
+                    if (newBox) {
+                        coords.x = newBox.x + (newBox.width / 2);
+                        coords.y = newBox.y + (newBox.height / 2);
+                    }
+    
+                    console.log('Intentando hacer clic en:', coords);
+                    
+                    // Intentar hacer click
+                    await press_click(rewardsPage, coords);
+                    
+                    // Esperar a que se abra la nueva pestaña
+                    await sleep(5000);
+                    
                 }
-                
-                // Calcular el punto central del enlace
-                const coords = {
-                    x: box.x + (box.width / 2),
-                    y: box.y + (box.height / 2)
-                };
-
-                // Ajustar el scroll para mantener el elemento visible
-                const viewportHeight = await rewardsPage.evaluate(() => window.innerHeight);
-                const targetScrollY = coords.y - (viewportHeight / 2);
-                
-                // Recalcular las coordenadas después del scroll
-                await humanScroll(rewardsPage, targetScrollY);
-                
-                // Esperar a que la página se estabilice después del scroll
-                await sleep(1000);
-                
-                // Verificar nuevamente las coordenadas después del scroll
-                const newBox = await link.boundingBox();
-                if (newBox) {
-                    coords.x = newBox.x + (newBox.width / 2);
-                    coords.y = newBox.y + (newBox.height / 2);
-                }
-
-                console.log('Intentando hacer clic en:', coords);
-                
-                // Intentar hacer click
-                await press_click(rewardsPage, coords);
-                
-                // Esperar a que se abra la nueva pestaña
-                await sleep(5000);
-                
                 // Verificar si se abrió una nueva pestaña
                 let allTabs = await browser.pages();
                 let newTab = allTabs[allTabs.length - 1];
@@ -624,14 +579,8 @@ async function processRewardsPage(rewardsPage, browser) {
                     console.log("No se abrió ventana para "+element.text);
                     // Obtener la URL y datos del enlace
                     const linkData = await targetCard.evaluate(el => {
-                        const link = el.querySelector('a.ds-card-sec');
-                        if (!link) return null;
-                        
                         return {
-                            href: link.href,
-                            biId: el.getAttribute('data-bi-id'),
-                            dataM: el.getAttribute('data-m'),
-                            isRewardable: el.hasAttribute('mee-rewardable')
+                            href: el.getAttribute('href')
                         };
                     });
                     
@@ -647,19 +596,8 @@ async function processRewardsPage(rewardsPage, browser) {
                                 view: window
                             });
                             
-                            // 2. Asegurarse de que los atributos estén presentes
-                            if (!el.hasAttribute('mee-rewardable')) {
-                                el.setAttribute('mee-rewardable', '');
-                            }
-                            if (!el.getAttribute('data-bi-id')) {
-                                el.setAttribute('data-bi-id', data.biId);
-                            }
-                            if (!el.getAttribute('data-m')) {
-                                el.setAttribute('data-m', data.dataM);
-                            }
-                            
                             // 3. Disparar el evento en el elemento correcto
-                            const link = el.querySelector('a.ds-card-sec');
+                            const link = el
                             if (link) {
                                 // Disparar el evento nativo
                                 link.dispatchEvent(event);
@@ -738,7 +676,20 @@ async function processRewardsPage(rewardsPage, browser) {
             }
         }
 
-        if (!searchPageValidated) {
+        if(section == "dailyset"){
+            console.log("Accediendo a rewards manualmente")
+            await rewardsPage.goto('https://rewards.bing.com/earn', { waitUntil: 'domcontentloaded' });
+                
+            try {
+                await rewardsPage.waitForSelector('body', { timeout: 5000 });
+                console.log('Nueva página cargada correctamente');
+                
+            } catch (error) {
+                console.log('La página ya estaba cargada');
+            }
+            await processRewardsPage(rewardsPage, browser, "moreactivities");
+        }
+        if (!searchPageValidated && section=="moreactivities") {
             console.log("No se encontro tarjeta para la recompensa de busqueda. Accediendo a bing manualmente")
             newTab = await browser.newPage();
             await newTab.goto('https://www.bing.com/');
@@ -820,7 +771,7 @@ function getEdgeProcessesWithPriority() {
 }
 
 async function runBot() {
-    await sleep(30000);
+    // await sleep(30000);
     try{
         // Primero ejecutar el script de Python para cerrar Edge
         console.log('Cerrando instancias de Edge...');
@@ -890,50 +841,20 @@ async function runBot() {
         
         // Esperar a que los resultados aparezcan
         await sleep(5000);
-        
-        press_click(activeTab, COORD_SEGUNDO_CLICK)
-        await sleep(4000);
-        press_click(activeTab, COORD_TERCER_CLICK)
-        await sleep(10000);
-
-        // Esperar y capturar la nueva pestaña que se abre
-        let allTabs = await browser.pages();
-        let newTab = allTabs[allTabs.length - 1]; // La última pestaña es la nueva
-        
-        // Verificar que la nueva pestaña sea diferente a la actual
-        if (newTab !== activeTab) {
-            console.log('Cambiando a la nueva pestaña de rewards...');
-            await activeTab.close();
-            const rewardsPage = newTab;
+        console.log("Accediendo a rewards manualmente")
+        await activeTab.goto('https://rewards.bing.com/dashboard', { waitUntil: 'domcontentloaded' });
             
-            try {
-                await rewardsPage.waitForSelector('body', { timeout: 5000 });
-                console.log('Nueva página cargada correctamente');
-                
-                
-            } catch (error) {
-                console.log('La página ya estaba cargada');
-            }
-            // Procesar la página de rewards
-            await processRewardsPage(rewardsPage, browser);
+        try {
+            await rewardsPage.waitForSelector('body', { timeout: 5000 });
+            console.log('Nueva página cargada correctamente');
             
-            await sleep(2000);
-        }else{
-            console.log("No se pudo abrir con click. Accediendo a rewards manualmente")
-            await activeTab.goto('https://rewards.bing.com/?ref=rewardspanel', { waitUntil: 'domcontentloaded' });
-                
-            try {
-                await rewardsPage.waitForSelector('body', { timeout: 5000 });
-                console.log('Nueva página cargada correctamente');
-                
-                
-            } catch (error) {
-                console.log('La página ya estaba cargada');
-            }
-            // Procesar la página de rewards
-            await processRewardsPage(activeTab, browser);
-            await sleep(2000);
+            
+        } catch (error) {
+            console.log('La página ya estaba cargada');
         }
+        // Procesar la página de rewards
+        await processRewardsPage(activeTab, browser, "dailyset");
+        await sleep(2000);
 
 
         await sleep(10000)
